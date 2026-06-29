@@ -43,21 +43,58 @@ def guard(update: Update) -> bool:
         return False
     return True
 
-# ──────────── ЗВУК (через PowerShell / nircmd) ────────────
+# ──────────── PowerShell helper ────────────
 def _ps(cmd: str) -> None:
     subprocess.run(["powershell", "-Command", cmd], capture_output=True)
 
-def volume_up():
-    _ps("(New-Object -com WScript.Shell).SendKeys([char]175)")   # VK_VOLUME_UP ×5
-    for _ in range(4):
-        _ps("(New-Object -com WScript.Shell).SendKeys([char]175)")
+# ──────────── ЗВУК — pycaw (найнадійніший) ────────────
+try:
+    from ctypes import cast, POINTER
+    from comtypes import CLSCTX_ALL
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-def volume_down():
-    for _ in range(5):
-        _ps("(New-Object -com WScript.Shell).SendKeys([char]174)")
+    def _vol_iface():
+        devices = AudioUtilities.GetSpeakers()
+        iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        return cast(iface, POINTER(IAudioEndpointVolume))
 
-def volume_mute():
-    _ps("(New-Object -com WScript.Shell).SendKeys([char]173)")
+    def volume_up():
+        v = _vol_iface()
+        v.SetMasterVolumeLevelScalar(min(1.0, v.GetMasterVolumeLevelScalar() + 0.10), None)
+
+    def volume_down():
+        v = _vol_iface()
+        v.SetMasterVolumeLevelScalar(max(0.0, v.GetMasterVolumeLevelScalar() - 0.10), None)
+
+    def volume_mute():
+        v = _vol_iface()
+        v.SetMute(not v.GetMute(), None)
+
+    def volume_zero():
+        v = _vol_iface()
+        v.SetMasterVolumeLevelScalar(0.0, None)
+
+    log.info("pycaw: керування звуком активне ✅")
+
+except ImportError:
+    log.warning("pycaw не знайдено — використовується WinAPI keybd_event")
+
+    # ──────────── FALLBACK: WinAPI keybd_event ────────────
+    VK_VOLUME_UP   = 0xAF
+    VK_VOLUME_DOWN = 0xAE
+    VK_VOLUME_MUTE = 0xAD
+    KEYEVENTF_EXTENDEDKEY = 0x0001
+    KEYEVENTF_KEYUP       = 0x0002
+
+    def _media_key(vk: int, count: int = 1):
+        for _ in range(count):
+            ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
+            ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+
+    def volume_up():    _media_key(VK_VOLUME_UP,   5)
+    def volume_down():  _media_key(VK_VOLUME_DOWN, 5)
+    def volume_mute():  _media_key(VK_VOLUME_MUTE, 1)
+    def volume_zero():  _media_key(VK_VOLUME_DOWN, 50)  # 50 натискань = до нуля
 
 # ──────────── ЯСКРАВІСТЬ ────────────
 def _get_brightness() -> int:
@@ -76,11 +113,8 @@ def _set_brightness(level: int) -> None:
     _ps(f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)"
         f".WmiSetBrightness(1,{level})")
 
-def brightness_up():
-    _set_brightness(_get_brightness() + 10)
-
-def brightness_down():
-    _set_brightness(_get_brightness() - 10)
+def brightness_up():   _set_brightness(_get_brightness() + 10)
+def brightness_down(): _set_brightness(_get_brightness() - 10)
 
 # ──────────── СИСТЕМНІ ────────────
 def minimize_all():
@@ -99,7 +133,6 @@ def open_url(link: str, incognito: bool = False):
     if not link.startswith("http"):
         link = "https://" + link
     if incognito:
-        # Chrome incognito
         chrome_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -108,22 +141,24 @@ def open_url(link: str, incognito: bool = False):
             if os.path.exists(p):
                 subprocess.Popen([p, "--incognito", link])
                 return
-        # fallback — Firefox приватний режим
         subprocess.Popen(["firefox", "--private-window", link], shell=True)
     else:
         webbrowser.open(link)
 
-# ──────────── КЛАВІАТУРА ГОЛОВНОГО МЕНЮ ────────────
+# ──────────── КЛАВІАТУРИ ────────────
 def main_keyboard():
     kb = [
         [
-            InlineKeyboardButton("🔊 Гучніше",    callback_data="vol_up"),
-            InlineKeyboardButton("🔉 Тихіше",     callback_data="vol_down"),
-            InlineKeyboardButton("🔇 Тихо",       callback_data="vol_mute"),
+            InlineKeyboardButton("🔊 Гучніше",     callback_data="vol_up"),
+            InlineKeyboardButton("🔉 Тихіше",      callback_data="vol_down"),
+            InlineKeyboardButton("🔇 Тихо/Звук",   callback_data="vol_mute"),
         ],
         [
-            InlineKeyboardButton("☀️ Яскравіше",  callback_data="br_up"),
-            InlineKeyboardButton("🌑 Темніше",    callback_data="br_down"),
+            InlineKeyboardButton("🔕 Звук = 0",    callback_data="vol_zero"),
+        ],
+        [
+            InlineKeyboardButton("☀️ Яскравіше",   callback_data="br_up"),
+            InlineKeyboardButton("🌑 Темніше",     callback_data="br_down"),
         ],
         [
             InlineKeyboardButton("🗕 Згорнути все", callback_data="minimize"),
@@ -177,7 +212,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     lower = text.lower()
 
-    # open <app>
     if lower.startswith("open "):
         app = text[5:].strip()
         if app:
@@ -188,7 +222,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Помилка: {e}")
         return
 
-    # url <link>
     if lower.startswith("url "):
         link = text[4:].strip()
         if link:
@@ -196,7 +229,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🌐 Відкриваю: `{link}`", parse_mode="Markdown")
         return
 
-    # aurl <link>
     if lower.startswith("aurl "):
         link = text[5:].strip()
         if link:
@@ -204,7 +236,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🕵️ Інкогніто: `{link}`", parse_mode="Markdown")
         return
 
-    # amenu
     if lower == "amenu":
         await update.message.reply_text(
             "📋 *Швидке меню*\nВибери програму:",
@@ -213,19 +244,16 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # lock
     if lower == "lock":
         lock_pc()
         await update.message.reply_text("🔒 ПК заблоковано")
         return
 
-    # theend
     if lower == "theend":
         await update.message.reply_text("⚡ Вимкнення через 10 секунд...")
         shutdown_pc()
         return
 
-    # unknown
     await update.message.reply_text(
         "❓ Не розумію. Введи `/help` для списку команд.",
         parse_mode="Markdown"
@@ -238,13 +266,14 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = q.data
 
     actions = {
-        "vol_up":   (volume_up,    "🔊 Гучність підвищена"),
-        "vol_down": (volume_down,  "🔉 Гучність знижена"),
-        "vol_mute": (volume_mute,  "🔇 Звук вимкнено"),
-        "br_up":    (brightness_up,  "☀️ Яскравість підвищена"),
-        "br_down":  (brightness_down,"🌑 Яскравість знижена"),
-        "minimize": (minimize_all, "🗕 Всі вікна згорнуто"),
-        "lock":     (lock_pc,     "🔒 ПК заблоковано"),
+        "vol_up":   (volume_up,       "🔊 Гучність +10%"),
+        "vol_down": (volume_down,     "🔉 Гучність -10%"),
+        "vol_mute": (volume_mute,     "🔇 Тихо / Увімкнути"),
+        "vol_zero": (volume_zero,     "🔕 Звук знижено до 0"),
+        "br_up":    (brightness_up,   "☀️ Яскравість +10%"),
+        "br_down":  (brightness_down, "🌑 Яскравість -10%"),
+        "minimize": (minimize_all,    "🗕 Всі вікна згорнуто"),
+        "lock":     (lock_pc,         "🔒 ПК заблоковано"),
     }
 
     if data in actions:
