@@ -25,6 +25,10 @@ log = logging.getLogger(__name__)
 
 # ──────────── QUICK-MENU APPS ────────────
 AMENU_APPS = [
+    ("🎮 Steam",        r"C:\Program Files (x86)\Steam\steam.exe"),
+    ("💬 Discord",      r""),
+    ("⛏️ TLauncher",    r""),
+    ("🧅 Tor Browser",  r""),
     ("🗒️ Блокнот",      "notepad.exe"),
     ("📁 Провідник",    "explorer.exe"),
     ("🧮 Калькулятор",  "calc.exe"),
@@ -62,21 +66,36 @@ try:
         )
         return cast(iface, POINTER(IAudioEndpointVolume))
 
-    def volume_up():
+    def get_volume_status() -> tuple[int, bool]:
+        """Повертає (відсоток_гучності, чи_замучено)"""
         v = _vol_iface()
-        v.SetMasterVolumeLevelScalar(min(1.0, v.GetMasterVolumeLevelScalar() + 0.10), None)
+        pct = round(v.GetMasterVolumeLevelScalar() * 100)
+        muted = bool(v.GetMute())
+        return pct, muted
 
-    def volume_down():
+    def volume_up() -> tuple[int, bool]:
         v = _vol_iface()
-        v.SetMasterVolumeLevelScalar(max(0.0, v.GetMasterVolumeLevelScalar() - 0.10), None)
+        new_level = min(1.0, v.GetMasterVolumeLevelScalar() + 0.10)
+        v.SetMasterVolumeLevelScalar(new_level, None)
+        return round(new_level * 100), bool(v.GetMute())
 
-    def volume_mute():
+    def volume_down() -> tuple[int, bool]:
         v = _vol_iface()
-        v.SetMute(not v.GetMute(), None)
+        new_level = max(0.0, v.GetMasterVolumeLevelScalar() - 0.10)
+        v.SetMasterVolumeLevelScalar(new_level, None)
+        return round(new_level * 100), bool(v.GetMute())
 
-    def volume_zero():
+    def volume_mute() -> tuple[int, bool]:
+        v = _vol_iface()
+        new_mute = not v.GetMute()
+        v.SetMute(new_mute, None)
+        pct = round(v.GetMasterVolumeLevelScalar() * 100)
+        return pct, new_mute
+
+    def volume_zero() -> tuple[int, bool]:
         v = _vol_iface()
         v.SetMasterVolumeLevelScalar(0.0, None)
+        return 0, bool(v.GetMute())
 
     # тестовий виклик при старті — якщо впаде, перейдемо у except нижче
     _test = _vol_iface()
@@ -88,21 +107,44 @@ except Exception as e:
     log.warning(f"pycaw недоступний ({e}) — використовується WinAPI keybd_event")
 
     # ──────────── FALLBACK: WinAPI keybd_event (без COM, завжди працює) ────────────
+    # Тут немає прямого доступу до точного % гучності системи, тому
+    # ведемо приблизний внутрішній лічильник у самому боті.
     VK_VOLUME_UP   = 0xAF
     VK_VOLUME_DOWN = 0xAE
     VK_VOLUME_MUTE = 0xAD
     KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP       = 0x0002
 
+    _fallback_state = {"level": 50, "muted": False}  # початкове наближення
+
     def _media_key(vk: int, count: int = 1):
         for _ in range(count):
             ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
             ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
 
-    def volume_up():    _media_key(VK_VOLUME_UP,   5)
-    def volume_down():  _media_key(VK_VOLUME_DOWN, 5)
-    def volume_mute():  _media_key(VK_VOLUME_MUTE, 1)
-    def volume_zero():  _media_key(VK_VOLUME_DOWN, 50)  # 50 натискань = до нуля
+    def get_volume_status() -> tuple[int, bool]:
+        return _fallback_state["level"], _fallback_state["muted"]
+
+    def volume_up() -> tuple[int, bool]:
+        _media_key(VK_VOLUME_UP, 5)
+        _fallback_state["level"] = min(100, _fallback_state["level"] + 10)
+        _fallback_state["muted"] = False
+        return _fallback_state["level"], _fallback_state["muted"]
+
+    def volume_down() -> tuple[int, bool]:
+        _media_key(VK_VOLUME_DOWN, 5)
+        _fallback_state["level"] = max(0, _fallback_state["level"] - 10)
+        return _fallback_state["level"], _fallback_state["muted"]
+
+    def volume_mute() -> tuple[int, bool]:
+        _media_key(VK_VOLUME_MUTE, 1)
+        _fallback_state["muted"] = not _fallback_state["muted"]
+        return _fallback_state["level"], _fallback_state["muted"]
+
+    def volume_zero() -> tuple[int, bool]:
+        _media_key(VK_VOLUME_DOWN, 50)
+        _fallback_state["level"] = 0
+        return 0, _fallback_state["muted"]
 
 
 
@@ -137,7 +179,85 @@ def shutdown_pc():
     subprocess.run(["shutdown", "/s", "/t", "10"])
 
 def open_app(name: str):
-    subprocess.Popen(name, shell=True)
+    # CREATE_NEW_CONSOLE — щоб консольні застосунки (cmd, powershell)
+    # відкривались у власному вікні, а не виводили текст у консоль бота
+    CREATE_NEW_CONSOLE = 0x00000010
+    subprocess.Popen(
+        name,
+        shell=True,
+        creationflags=CREATE_NEW_CONSOLE
+    )
+
+def show_text_window(text: str, title: str = "Повідомлення"):
+    """
+    Показує текст у легкому спливаючому віконці через mshta
+    (вбудований у Windows HTML-движок, без temp-файлів і без
+    окремого процесу типу notepad.exe, що висить у пам'яті).
+    """
+    import html as html_lib
+
+    safe_text = html_lib.escape(text).replace("\n", "<br>")
+    safe_title = html_lib.escape(title)
+
+    hta = f"""
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>{safe_title}</title>
+<HTA:APPLICATION
+    APPLICATIONNAME="Note"
+    SCROLL="yes"
+    SINGLEINSTANCE="no"
+    CAPTION="yes"
+    SYSMENU="yes"
+    MAXIMIZEBUTTON="yes"
+    MINIMIZEBUTTON="yes"
+/>
+<style>
+    body {{
+        background: #1e1e2e;
+        color: #cdd6f4;
+        font-family: Segoe UI, sans-serif;
+        font-size: 16px;
+        padding: 20px;
+        margin: 0;
+    }}
+    .content {{
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        line-height: 1.5;
+    }}
+</style>
+</head>
+<body>
+<div class="content">{safe_text}</div>
+<script>
+    window.resizeTo(500, 400);
+    window.moveTo((screen.width-500)/2, (screen.height-400)/2);
+</script>
+</body>
+</html>
+""".strip()
+
+    import tempfile, time
+    folder = os.path.join(tempfile.gettempdir(), "tgbot_hta")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"note_{int(time.time()*1000)}.hta")
+    # utf-8-sig (з BOM) — mshta правильно визначає кодування і кирилицю
+    with open(path, "w", encoding="utf-8-sig") as f:
+        f.write(hta)
+
+    subprocess.Popen(["mshta.exe", path])
+
+    # видаляємо файл за кілька секунд, mshta вже встигне його прочитати
+    def _cleanup():
+        time.sleep(3)
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+    import threading
+    threading.Thread(target=_cleanup, daemon=True).start()
 
 def open_url(link: str, incognito: bool = False):
     if not link.startswith("http"):
@@ -185,8 +305,8 @@ def amenu_keyboard():
     rows = []
     for i in range(0, len(AMENU_APPS), 2):
         row = []
-        for label, app in AMENU_APPS[i:i+2]:
-            row.append(InlineKeyboardButton(label, callback_data=f"open__{app}"))
+        for idx, (label, app) in enumerate(AMENU_APPS[i:i+2], start=i):
+            row.append(InlineKeyboardButton(label, callback_data=f"open__{idx}"))
         rows.append(row)
     rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(rows)
@@ -205,6 +325,8 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = (
         "📖 *Список команд:*\n\n"
         "`/start` — головне меню\n"
+        "`write <текст>` — показати текст у вікні на ПК\n"
+        "  _Приклад:_ `write Привіт зі смартфону!`\n\n"
         "`open <програма>` — відкрити програму\n"
         "  _Приклад:_ `open notepad.exe`\n\n"
         "`url <посилання>` — відкрити в браузері\n"
@@ -221,6 +343,16 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not guard(update): return
     text = (update.message.text or "").strip()
     lower = text.lower()
+
+    if lower.startswith("write "):
+        content = text[6:].strip()  # беремо з оригінального тексту, не lower(), щоб зберегти регістр
+        if content:
+            try:
+                show_text_window(content)
+                await update.message.reply_text("🪟 Показано у вікні на ПК")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Помилка: {e}")
+        return
 
     if lower.startswith("open "):
         app = text[5:].strip()
@@ -274,18 +406,35 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
 
+    VOLUME_ACTIONS = {
+        "vol_up":   volume_up,
+        "vol_down": volume_down,
+        "vol_mute": volume_mute,
+        "vol_zero": volume_zero,
+    }
+
     actions = {
-        "vol_up":   (volume_up,       "🔊 Гучність +10%"),
-        "vol_down": (volume_down,     "🔉 Гучність -10%"),
-        "vol_mute": (volume_mute,     "🔇 Тихо / Увімкнути"),
-        "vol_zero": (volume_zero,     "🔕 Звук знижено до 0"),
         "br_up":    (brightness_up,   "☀️ Яскравість +10%"),
         "br_down":  (brightness_down, "🌑 Яскравість -10%"),
         "minimize": (minimize_all,    "🗕 Всі вікна згорнуто"),
         "lock":     (lock_pc,         "🔒 ПК заблоковано"),
     }
 
-    if data in actions:
+    if data in VOLUME_ACTIONS:
+        try:
+            pct, muted = VOLUME_ACTIONS[data]()
+            if muted:
+                msg = "🔇 Звук вимкнено"
+            elif pct == 0:
+                msg = "🔕 Гучність: 0% (тихо)"
+            else:
+                msg = f"🔊 Гучність: {pct}%"
+            await q.answer(msg, show_alert=False)
+        except Exception as e:
+            log.exception("Помилка дії %s", data)
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+
+    elif data in actions:
         fn, msg = actions[data]
         try:
             fn()
@@ -322,12 +471,13 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pass
 
     elif data.startswith("open__"):
-        app = data[6:]
         try:
+            idx = int(data[6:])
+            label, app = AMENU_APPS[idx]
             open_app(app)
-            await q.answer(f"✅ Відкриваю: {app}")
+            await q.answer(f"✅ Відкриваю: {label}")
         except Exception as e:
-            log.exception("Помилка відкриття %s", app)
+            log.exception("Помилка відкриття за index %s", data)
             await q.answer(f"❌ {e}", show_alert=True)
 
 # ──────────── MAIN ────────────
