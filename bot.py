@@ -9,7 +9,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
-
+import urllib.parse
 # ─────────────────────────────────────────────
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
@@ -35,7 +35,7 @@ AMENU_APPS = [
     ("🎵 Медіаплеєр",   "wmplayer.exe"),
     ("⚙️ Диспетчер",    "taskmgr.exe"),
     ("🖥️ CMD",          "cmd.exe"),
-    ("🌐 Chrome",       "chrome.exe"),
+    ("🌐 Chrome",       r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
     ("📝 PowerShell",   "powershell.exe"),
 ]
 
@@ -114,6 +114,7 @@ except Exception as e:
     VK_VOLUME_MUTE = 0xAD
     KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP       = 0x0002
+    VK_SPACE = 0x20
 
     _fallback_state = {"level": 50, "muted": False}  # початкове наближення
 
@@ -160,13 +161,26 @@ def _get_brightness() -> int:
     except Exception:
         return 50
 
-def _set_brightness(level: int) -> None:
+
+def _set_brightness(level: int) -> int:
     level = max(0, min(100, level))
     _ps(f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)"
         f".WmiSetBrightness(1,{level})")
+    return level
 
-def brightness_up():   _set_brightness(_get_brightness() + 10)
-def brightness_down(): _set_brightness(_get_brightness() - 10)
+
+def get_brightness_status() -> int:
+    return _get_brightness()
+
+
+def brightness_up() -> int:
+    new_level = _set_brightness(_get_brightness() + 10)
+    return new_level
+
+
+def brightness_down() -> int:
+    new_level = _set_brightness(_get_brightness() - 10)
+    return new_level
 
 # ──────────── СИСТЕМНІ ────────────
 def minimize_all():
@@ -177,6 +191,13 @@ def lock_pc():
 
 def shutdown_pc():
     subprocess.run(["shutdown", "/s", "/t", "10"])
+
+def press_space():
+    KEYEVENTF_EXTENDEDKEY = 0x0001
+    KEYEVENTF_KEYUP = 0x0002
+
+    ctypes.windll.user32.keybd_event(VK_SPACE, 0, KEYEVENTF_EXTENDEDKEY, 0)
+    ctypes.windll.user32.keybd_event(VK_SPACE, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
 
 def open_app(name: str):
     # CREATE_NEW_CONSOLE — щоб консольні застосунки (cmd, powershell)
@@ -275,6 +296,10 @@ def open_url(link: str, incognito: bool = False):
     else:
         webbrowser.open(link)
 
+def search_web(query: str):
+    q = urllib.parse.quote(query)
+    url = f"https://www.google.com/search?q={q}"
+    webbrowser.open(url)
 # ──────────── КЛАВІАТУРИ ────────────
 def main_keyboard():
     kb = [
@@ -289,6 +314,9 @@ def main_keyboard():
         [
             InlineKeyboardButton("☀️ Яскравіше",   callback_data="br_up"),
             InlineKeyboardButton("🌑 Темніше",     callback_data="br_down"),
+        ],
+        [
+            InlineKeyboardButton("_SPACE", callback_data="space"),
         ],
         [
             InlineKeyboardButton("🗕 Згорнути все", callback_data="minimize"),
@@ -336,6 +364,8 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`amenu` — швидке меню додатків\n"
         "`lock` — заблокувати ПК\n"
         "`theend` — вимкнути ПК\n"
+        "`search` <запит> — пошук у Google\n"
+        "`write` — показати текст у вікні на ПК\n"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -395,7 +425,12 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚡ Вимкнення через 10 секунд...")
         shutdown_pc()
         return
-
+    if lower.startswith("search "):
+        query = text[7:].strip()
+        if query:
+            search_web(query)
+            await update.message.reply_text(f"🔎 Пошук: `{query}`", parse_mode="Markdown")
+        return
     await update.message.reply_text(
         "❓ Не розумію. Введи `/help` для списку команд.",
         parse_mode="Markdown"
@@ -414,8 +449,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     }
 
     actions = {
-        "br_up":    (brightness_up,   "☀️ Яскравість +10%"),
-        "br_down":  (brightness_down, "🌑 Яскравість -10%"),
         "minimize": (minimize_all,    "🗕 Всі вікна згорнуто"),
         "lock":     (lock_pc,         "🔒 ПК заблоковано"),
     }
@@ -479,7 +512,25 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             log.exception("Помилка відкриття за index %s", data)
             await q.answer(f"❌ {e}", show_alert=True)
+    elif data in ["br_up", "br_down"]:
+        try:
+            if data == "br_up":
+                level = brightness_up()
+                msg = f"☀️ Яскравість: {level}%"
+            else:
+                level = brightness_down()
+                msg = f"🌑 Яскравість: {level}%"
 
+            await q.answer(msg, show_alert=False)
+        except Exception as e:
+            log.exception("Brightness error")
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+    elif data == "space":
+        try:
+            press_space()
+            await q.answer("␣ Пробіл натиснуто", show_alert=False)
+        except Exception as e:
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
 # ──────────── MAIN ────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
