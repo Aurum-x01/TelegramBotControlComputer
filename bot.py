@@ -47,15 +47,19 @@ def guard(update: Update) -> bool:
 def _ps(cmd: str) -> None:
     subprocess.run(["powershell", "-Command", cmd], capture_output=True)
 
-# ──────────── ЗВУК — pycaw (найнадійніший) ────────────
+# ──────────── ЗВУК — pycaw (з правильною ініціалізацією COM) ────────────
 try:
     from ctypes import cast, POINTER
-    from comtypes import CLSCTX_ALL
+    import comtypes
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
     def _vol_iface():
+        # COM треба ініціалізувати в КОЖНОМУ потоці, де він використовується
+        comtypes.CoInitialize()
         devices = AudioUtilities.GetSpeakers()
-        iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        iface = devices.Activate(
+            IAudioEndpointVolume._iid_, comtypes.CLSCTX_ALL, None
+        )
         return cast(iface, POINTER(IAudioEndpointVolume))
 
     def volume_up():
@@ -74,12 +78,16 @@ try:
         v = _vol_iface()
         v.SetMasterVolumeLevelScalar(0.0, None)
 
+    # тестовий виклик при старті — якщо впаде, перейдемо у except нижче
+    _test = _vol_iface()
+    _test.GetMasterVolumeLevelScalar()
+
     log.info("pycaw: керування звуком активне ✅")
 
-except ImportError:
-    log.warning("pycaw не знайдено — використовується WinAPI keybd_event")
+except Exception as e:
+    log.warning(f"pycaw недоступний ({e}) — використовується WinAPI keybd_event")
 
-    # ──────────── FALLBACK: WinAPI keybd_event ────────────
+    # ──────────── FALLBACK: WinAPI keybd_event (без COM, завжди працює) ────────────
     VK_VOLUME_UP   = 0xAF
     VK_VOLUME_DOWN = 0xAE
     VK_VOLUME_MUTE = 0xAD
@@ -95,6 +103,8 @@ except ImportError:
     def volume_down():  _media_key(VK_VOLUME_DOWN, 5)
     def volume_mute():  _media_key(VK_VOLUME_MUTE, 1)
     def volume_zero():  _media_key(VK_VOLUME_DOWN, 50)  # 50 натискань = до нуля
+
+
 
 # ──────────── ЯСКРАВІСТЬ ────────────
 def _get_brightness() -> int:
@@ -262,7 +272,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not guard(update): return
     q = update.callback_query
-    await q.answer()
     data = q.data
 
     actions = {
@@ -280,39 +289,46 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         fn, msg = actions[data]
         try:
             fn()
-            await q.edit_message_text(msg, reply_markup=main_keyboard())
+            await q.answer(msg, show_alert=False)
         except Exception as e:
-            await q.edit_message_text(f"❌ Помилка: {e}", reply_markup=main_keyboard())
+            log.exception("Помилка дії %s", data)
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
 
     elif data == "theend":
+        await q.answer()
         await q.edit_message_text("⚡ Вимкнення через 10 секунд...")
         shutdown_pc()
 
     elif data == "amenu":
-        await q.edit_message_text(
-            "📋 *Швидке меню*\nВибери програму:",
-            parse_mode="Markdown",
-            reply_markup=amenu_keyboard()
-        )
+        await q.answer()
+        try:
+            await q.edit_message_text(
+                "📋 *Швидке меню*\nВибери програму:",
+                parse_mode="Markdown",
+                reply_markup=amenu_keyboard()
+            )
+        except Exception:
+            pass  # повідомлення вже таке саме
 
     elif data == "back_main":
-        await q.edit_message_text(
-            "🖥️ *PC Control Bot*\nВибери дію:",
-            parse_mode="Markdown",
-            reply_markup=main_keyboard()
-        )
+        await q.answer()
+        try:
+            await q.edit_message_text(
+                "🖥️ *PC Control Bot*\nВибери дію:",
+                parse_mode="Markdown",
+                reply_markup=main_keyboard()
+            )
+        except Exception:
+            pass
 
     elif data.startswith("open__"):
         app = data[6:]
         try:
             open_app(app)
-            await q.edit_message_text(
-                f"✅ Відкриваю: `{app}`",
-                parse_mode="Markdown",
-                reply_markup=amenu_keyboard()
-            )
+            await q.answer(f"✅ Відкриваю: {app}")
         except Exception as e:
-            await q.edit_message_text(f"❌ {e}", reply_markup=amenu_keyboard())
+            log.exception("Помилка відкриття %s", app)
+            await q.answer(f"❌ {e}", show_alert=True)
 
 # ──────────── MAIN ────────────
 def main():
