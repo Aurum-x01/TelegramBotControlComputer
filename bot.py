@@ -4,12 +4,13 @@ import os
 import sys
 import ctypes
 import webbrowser
+import urllib.parse
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
-import urllib.parse
+
 # ─────────────────────────────────────────────
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
@@ -27,15 +28,15 @@ log = logging.getLogger(__name__)
 AMENU_APPS = [
     ("🎮 Steam",        r"C:\Program Files (x86)\Steam\steam.exe"),
     ("💬 Discord",      r""),
-    ("⛏️ TLauncher",    r""),
-    ("🧅 Tor Browser",  r""),
+    ("⛏️ Minecraft",    r""),
+    ("🧅 Browser",  r""),
     ("🗒️ Блокнот",      "notepad.exe"),
     ("📁 Провідник",    "explorer.exe"),
     ("🧮 Калькулятор",  "calc.exe"),
     ("🎵 Медіаплеєр",   "wmplayer.exe"),
     ("⚙️ Диспетчер",    "taskmgr.exe"),
     ("🖥️ CMD",          "cmd.exe"),
-    ("🌐 Chrome",       r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+    ("🌐 Chrome",       "chrome.exe"),
     ("📝 PowerShell",   "powershell.exe"),
 ]
 
@@ -47,9 +48,15 @@ def guard(update: Update) -> bool:
         return False
     return True
 
-# ──────────── PowerShell helper ────────────
-def _ps(cmd: str) -> None:
-    subprocess.run(["powershell", "-Command", cmd], capture_output=True)
+# ──────────── PowerShell helper (прихований, без вікна) ────────────
+def _ps(cmd: str) -> str:
+    CREATE_NO_WINDOW = 0x08000000
+    result = subprocess.run(
+        ["powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd],
+        capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW
+    )
+    return result.stdout.strip()
 
 # ──────────── ЗВУК — pycaw (з правильною ініціалізацією COM) ────────────
 try:
@@ -115,6 +122,21 @@ except Exception as e:
     KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP       = 0x0002
     VK_SPACE = 0x20
+    VK_LEFT = 0x25
+    VK_RIGHT = 0x27
+    VK_F = 0x46
+    VK_K = 0x4B
+    VK_J = 0x4A
+    VK_L = 0x4C
+    VK_N = 0x4E
+    VK_P = 0x50
+
+    def press_key(vk):
+        KEYEVENTF_EXTENDEDKEY = 0x0001
+        KEYEVENTF_KEYUP = 0x0002
+
+        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
+        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
 
     _fallback_state = {"level": 50, "muted": False}  # початкове наближення
 
@@ -147,40 +169,53 @@ except Exception as e:
         _fallback_state["level"] = 0
         return 0, _fallback_state["muted"]
 
+    def search_web(query: str):
+        q = urllib.parse.quote(query)
+        url = f"https://www.google.com/search?q={q}"
+        webbrowser.open(url)
 
+# ──────────── ЯСКРАВІСТЬ (через WMI напряму, без PowerShell) ────────────
+try:
+    import wmi as _wmi_module
+    _wmi_obj = _wmi_module.WMI(namespace="root/WMI")
 
-# ──────────── ЯСКРАВІСТЬ ────────────
-def _get_brightness() -> int:
-    r = subprocess.run(
-        ["powershell", "-Command",
-         "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"],
-        capture_output=True, text=True
-    )
-    try:
-        return int(r.stdout.strip())
-    except Exception:
-        return 50
+    def _get_brightness() -> int:
+        try:
+            return int(_wmi_obj.WmiMonitorBrightness()[0].CurrentBrightness)
+        except Exception:
+            return 50
 
+    def _set_brightness(level: int) -> int:
+        level = max(0, min(100, level))
+        try:
+            _wmi_obj.WmiMonitorBrightnessMethods()[0].WmiSetBrightness(level, 0)
+        except Exception:
+            pass
+        return level
 
-def _set_brightness(level: int) -> int:
-    level = max(0, min(100, level))
-    _ps(f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)"
-        f".WmiSetBrightness(1,{level})")
-    return level
+    log.info("WMI: яскравість активна ✅")
 
+except Exception as _wmi_err:
+    log.warning(f"WMI недоступний ({_wmi_err}) — fallback через PowerShell")
 
-def get_brightness_status() -> int:
-    return _get_brightness()
+    def _get_brightness() -> int:
+        out = _ps("(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness")
+        try:
+            return int(out)
+        except Exception:
+            return 50
 
+    def _set_brightness(level: int) -> int:
+        level = max(0, min(100, level))
+        _ps(f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})")
+        return level
 
 def brightness_up() -> int:
-    new_level = _set_brightness(_get_brightness() + 10)
-    return new_level
-
+    return _set_brightness(_get_brightness() + 10)
 
 def brightness_down() -> int:
-    new_level = _set_brightness(_get_brightness() - 10)
-    return new_level
+    return _set_brightness(_get_brightness() - 10)
+
 
 # ──────────── СИСТЕМНІ ────────────
 def minimize_all():
@@ -296,10 +331,6 @@ def open_url(link: str, incognito: bool = False):
     else:
         webbrowser.open(link)
 
-def search_web(query: str):
-    q = urllib.parse.quote(query)
-    url = f"https://www.google.com/search?q={q}"
-    webbrowser.open(url)
 # ──────────── КЛАВІАТУРИ ────────────
 def main_keyboard():
     kb = [
@@ -339,6 +370,26 @@ def amenu_keyboard():
     rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(rows)
 
+def yt_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⏯ Пауза", callback_data="yt_pause"),
+        ],
+        [
+            InlineKeyboardButton("⏪ -10с", callback_data="yt_back"),
+            InlineKeyboardButton("⏩ +10с", callback_data="yt_forward"),
+        ],
+        [
+            InlineKeyboardButton("⏭ Наступне", callback_data="yt_next"),
+            InlineKeyboardButton("⏮ Попереднє", callback_data="yt_prev"),
+        ],
+        [
+            InlineKeyboardButton("📺 Повний екран", callback_data="yt_full"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Назад", callback_data="back_main"),
+        ]
+    ])
 # ──────────── HANDLERS ────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not guard(update): return
@@ -362,10 +413,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`aurl <посилання>` — відкрити в інкогніто\n"
         "  _Приклад:_ `aurl youtube.com`\n\n"
         "`amenu` — швидке меню додатків\n"
+        "`search` — пошук інформації у гугл\n"
+        "`yt` — швидке меню керування ютуб\n"
         "`lock` — заблокувати ПК\n"
         "`theend` — вимкнути ПК\n"
-        "`search` <запит> — пошук у Google\n"
-        "`write` — показати текст у вікні на ПК\n"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -425,16 +476,30 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚡ Вимкнення через 10 секунд...")
         shutdown_pc()
         return
+
     if lower.startswith("search "):
         query = text[7:].strip()
         if query:
             search_web(query)
-            await update.message.reply_text(f"🔎 Пошук: `{query}`", parse_mode="Markdown")
+            await update.message.reply_text(
+                f"🔎 Пошук: `{query}`",
+                parse_mode="Markdown"
+            )
         return
+
+    if lower == "yt":
+        await update.message.reply_text(
+            "🎬 Керування YouTube",
+            reply_markup=yt_keyboard()
+        )
+        return
+
     await update.message.reply_text(
         "❓ Не розумію. Введи `/help` для списку команд.",
         parse_mode="Markdown"
     )
+    return
+    
 
 async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not guard(update): return
@@ -449,6 +514,8 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     }
 
     actions = {
+        "br_up":    (brightness_up,   "☀️ Яскравість +10%"),
+        "br_down":  (brightness_down, "🌑 Яскравість -10%"),
         "minimize": (minimize_all,    "🗕 Всі вікна згорнуто"),
         "lock":     (lock_pc,         "🔒 ПК заблоковано"),
     }
@@ -478,8 +545,30 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif data == "theend":
         await q.answer()
-        await q.edit_message_text("⚡ Вимкнення через 10 секунд...")
-        shutdown_pc()
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Так", callback_data="shutdown_yes"),
+                InlineKeyboardButton("❌ Ні", callback_data="shutdown_no"),
+            ]
+        ])
+
+        await q.edit_message_text(
+            "⚠️ Ви справді хочете вимкнути комп'ютер?",
+            reply_markup=kb
+        )
+    
+    elif data == "shutdown_yes":
+        await q.answer("Вимикаю ПК...")
+        await q.edit_message_text("⚡ Комп'ютер буде вимкнений через 10 секунд...")
+        subprocess.run(["shutdown", "/s", "/t", "10"])
+
+    elif data == "shutdown_no":
+        await q.answer("Скасовано")
+        await q.edit_message_text(
+            "🖥️ *PC Control Bot*\nВибери дію:",
+            parse_mode="Markdown",
+            reply_markup=main_keyboard()
+        )
 
     elif data == "amenu":
         await q.answer()
@@ -512,25 +601,38 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             log.exception("Помилка відкриття за index %s", data)
             await q.answer(f"❌ {e}", show_alert=True)
-    elif data in ["br_up", "br_down"]:
-        try:
-            if data == "br_up":
-                level = brightness_up()
-                msg = f"☀️ Яскравість: {level}%"
-            else:
-                level = brightness_down()
-                msg = f"🌑 Яскравість: {level}%"
-
-            await q.answer(msg, show_alert=False)
-        except Exception as e:
-            log.exception("Brightness error")
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
     elif data == "space":
         try:
             press_space()
             await q.answer("␣ Пробіл натиснуто", show_alert=False)
         except Exception as e:
             await q.answer(f"❌ Помилка: {e}", show_alert=True)
+
+    elif data == "yt_pause":
+        press_key(VK_K)
+        await q.answer("⏯ Пауза")
+
+    elif data == "yt_forward":
+        press_key(VK_L)
+        await q.answer("+10 секунд")
+
+    elif data == "yt_back":
+        press_key(VK_J)
+        await q.answer("-10 секунд")
+
+    elif data == "yt_full":
+        press_key(VK_F)
+        await q.answer("Повний екран")
+
+    elif data == "yt_next":
+        press_key(VK_N)
+        await q.answer("Наступне відео")
+
+    elif data == "yt_prev":
+        press_key(VK_P)
+        await q.answer("Попереднє відео")
+
+
 # ──────────── MAIN ────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
