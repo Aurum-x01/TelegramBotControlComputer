@@ -10,7 +10,26 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
+import pygetwindow as gw
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+def windows_keyboard():
+    kb = []
+
+    for w in gw.getAllWindows():
+        if w.title.strip():
+            kb.append([
+                InlineKeyboardButton(
+                    w.title[:45],
+                    callback_data=f"closewin|{w.title}"
+                )
+            ])
+
+    kb.append([
+        InlineKeyboardButton("⬅️ Назад", callback_data="back_main")
+    ])
+
+    return InlineKeyboardMarkup(kb)
 # ─────────────────────────────────────────────
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
@@ -357,6 +376,9 @@ def main_keyboard():
             InlineKeyboardButton("📋 Швидке меню", callback_data="amenu"),
             InlineKeyboardButton("⚡ Вимкнути ПК", callback_data="theend"),
         ],
+        [
+            InlineKeyboardButton("🪟 Вікна", callback_data="windows")
+        ],
     ]
     return InlineKeyboardMarkup(kb)
 
@@ -413,8 +435,6 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`aurl <посилання>` — відкрити в інкогніто\n"
         "  _Приклад:_ `aurl youtube.com`\n\n"
         "`amenu` — швидке меню додатків\n"
-        "`search` — пошук інформації у гугл\n"
-        "`yt` — швидке меню керування ютуб\n"
         "`lock` — заблокувати ПК\n"
         "`theend` — вимкнути ПК\n"
     )
@@ -632,14 +652,63 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         press_key(VK_P)
         await q.answer("Попереднє відео")
 
+    elif data == "windows":
+        await q.edit_message_text(
+            "🖥 Відкриті програми:",
+            reply_markup=windows_keyboard()
+        )
 
+    elif data.startswith("closewin|"):
+        title = data.split("|",1)[1]
+
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "✅ Так",
+                    callback_data=f"closeyes|{title}"
+                ),
+                InlineKeyboardButton(
+                    "❌ Ні",
+                    callback_data="windows"
+                )
+            ]
+        ])
+        await q.edit_message_text(
+            f"❓ Закрити\n\n{title}?",
+            reply_markup=kb
+        )
+
+    elif data.startswith("closeyes|"):
+        title = data.split("|",1)[1]
+
+        for w in gw.getAllWindows():
+            if w.title == title:
+                w.close()
+                break
+
+        await q.answer("Закрито")
+        await q.edit_message_text(
+            "🖥 Відкриті програми:",
+            reply_markup=windows_keyboard()
+    )
 # ──────────── MAIN ────────────
+async def startup_notify(app):
+    await app.bot.send_message(
+        chat_id=ALLOWED_ID,
+        text="🟢 Комп'ютер увімкнувся та бот запущений."
+    )
+
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌  Встав свій токен у змінну BOT_TOKEN у файлі bot.py!")
         sys.exit(1)
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(startup_notify)
+        .build()
+    )
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help",  cmd_help))
     app.add_handler(CallbackQueryHandler(on_callback))
