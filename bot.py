@@ -33,8 +33,8 @@ def windows_keyboard():
 # ─────────────────────────────────────────────
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
-BOT_TOKEN   = "YOUR_BOT_TOKEN_HERE"   # токен від @BotFather
-ALLOWED_ID  = 123456789               # твій Telegram user_id (перевір через @userinfobot)
+BOT_TOKEN   = "8927619037:AAHdH0HLMHE2Fp0g9-5sEV0qU0MniJbfOk0"   # токен від @BotFather
+ALLOWED_ID  = 1026975619               # твій Telegram user_id (перевір через @userinfobot)
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -46,17 +46,13 @@ log = logging.getLogger(__name__)
 # ──────────── QUICK-MENU APPS ────────────
 AMENU_APPS = [
     ("🎮 Steam",        r"C:\Program Files (x86)\Steam\steam.exe"),
-    ("💬 Discord",      r""),
-    ("⛏️ Minecraft",    r""),
-    ("🧅 Browser",  r""),
-    ("🗒️ Блокнот",      "notepad.exe"),
-    ("📁 Провідник",    "explorer.exe"),
-    ("🧮 Калькулятор",  "calc.exe"),
-    ("🎵 Медіаплеєр",   "wmplayer.exe"),
-    ("⚙️ Диспетчер",    "taskmgr.exe"),
-    ("🖥️ CMD",          "cmd.exe"),
-    ("🌐 Chrome",       "chrome.exe"),
-    ("📝 PowerShell",   "powershell.exe"),
+    ("💬 Discord",      r"C:\Users\pestr\AppData\Local\Discord\Update.exe --processStart Discord.exe"),
+    ("⛏️ TLauncher",    r"C:\Users\pestr\AppData\Roaming\.minecraft\TLauncher.exe"),
+    ("🧅 Tor Browser",  r"C:\Users\pestr\Desktop\Tor Browser\Browser\firefox.exe"),
+    ("🪖 SQUAD",        r"C:\Users\pestr\Desktop\files\cos\steam\Squad.url"),
+    ("⚠️ FPV",          r"C:\Users\pestr\Desktop\files\cos\steam\FPV Kamikaze Drone.url"),
+    ("🚛 ETS",          r"C:\Users\pestr\Desktop\files\cos\steam\Euro Truck Simulator 2.url"),
+
 ]
 
 # ──────────── GUARD ────────────
