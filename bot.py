@@ -13,15 +13,19 @@ from telegram.ext import (
 import pygetwindow as gw
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+_WINDOW_TITLES = {}  # idx -> title, оновлюється щоразу при відкритті меню вікон
+
 def windows_keyboard():
     kb = []
+    _WINDOW_TITLES.clear()
 
-    for w in gw.getAllWindows():
+    for idx, w in enumerate(gw.getAllWindows()):
         if w.title.strip():
+            _WINDOW_TITLES[idx] = w.title
             kb.append([
                 InlineKeyboardButton(
                     w.title[:45],
-                    callback_data=f"closewin|{w.title}"
+                    callback_data=f"closewin|{idx}"
                 )
             ])
 
@@ -33,8 +37,8 @@ def windows_keyboard():
 # ─────────────────────────────────────────────
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
-BOT_TOKEN   = "8927619037:AAHdH0HLMHE2Fp0g9-5sEV0qU0MniJbfOk0"   # токен від @BotFather
-ALLOWED_ID  = 1026975619               # твій Telegram user_id (перевір через @userinfobot)
+BOT_TOKEN   = ""   # токен від @BotFather
+ALLOWED_ID  = 123456789               # твій Telegram user_id (перевір через @userinfobot)
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -46,13 +50,10 @@ log = logging.getLogger(__name__)
 # ──────────── QUICK-MENU APPS ────────────
 AMENU_APPS = [
     ("🎮 Steam",        r"C:\Program Files (x86)\Steam\steam.exe"),
-    ("💬 Discord",      r"C:\Users\pestr\AppData\Local\Discord\Update.exe --processStart Discord.exe"),
-    ("⛏️ TLauncher",    r"C:\Users\pestr\AppData\Roaming\.minecraft\TLauncher.exe"),
-    ("🧅 Tor Browser",  r"C:\Users\pestr\Desktop\Tor Browser\Browser\firefox.exe"),
-    ("🪖 SQUAD",        r"C:\Users\pestr\Desktop\files\cos\steam\Squad.url"),
-    ("⚠️ FPV",          r"C:\Users\pestr\Desktop\files\cos\steam\FPV Kamikaze Drone.url"),
-    ("🚛 ETS",          r"C:\Users\pestr\Desktop\files\cos\steam\Euro Truck Simulator 2.url"),
-
+    ("💬 Discord",      r"C:\Users\admin\AppData\Local\Discord\Update.exe --processStart Discord.exe"),
+    ("⛏️ TLauncher",    r"C:\Users\admin\AppData\Roaming\.minecraft\TLauncher.exe"),
+    ("🧅 Tor Browser",  r"C:\Users\admin\Desktop\Tor Browser\Browser\firefox.exe"),
+    
 ]
 
 # ──────────── GUARD ────────────
@@ -649,19 +650,33 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.answer("Попереднє відео")
 
     elif data == "windows":
-        await q.edit_message_text(
-            "🖥 Відкриті програми:",
-            reply_markup=windows_keyboard()
-        )
+        try:
+            await q.edit_message_text(
+                "🖥 Відкриті програми:",
+                reply_markup=windows_keyboard()
+            )
+            await q.answer()
+        except Exception as e:
+            log.exception("Помилка відкриття списку вікон")
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
 
     elif data.startswith("closewin|"):
-        title = data.split("|",1)[1]
+        try:
+            idx = int(data.split("|", 1)[1])
+        except (ValueError, IndexError):
+            await q.answer("❌ Некоректні дані", show_alert=True)
+            return
+
+        title = _WINDOW_TITLES.get(idx)
+        if title is None:
+            await q.answer("❌ Вікно вже не існує, онови список", show_alert=True)
+            return
 
         kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
                     "✅ Так",
-                    callback_data=f"closeyes|{title}"
+                    callback_data=f"closeyes|{idx}"
                 ),
                 InlineKeyboardButton(
                     "❌ Ні",
@@ -669,24 +684,40 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             ]
         ])
-        await q.edit_message_text(
-            f"❓ Закрити\n\n{title}?",
-            reply_markup=kb
-        )
+        try:
+            await q.edit_message_text(
+                f"❓ Закрити\n\n{title}?",
+                reply_markup=kb
+            )
+            await q.answer()
+        except Exception as e:
+            log.exception("Помилка підтвердження закриття вікна")
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
 
     elif data.startswith("closeyes|"):
-        title = data.split("|",1)[1]
+        try:
+            idx = int(data.split("|", 1)[1])
+        except (ValueError, IndexError):
+            await q.answer("❌ Некоректні дані", show_alert=True)
+            return
 
-        for w in gw.getAllWindows():
-            if w.title == title:
-                w.close()
-                break
+        title = _WINDOW_TITLES.get(idx)
 
-        await q.answer("Закрито")
-        await q.edit_message_text(
-            "🖥 Відкриті програми:",
-            reply_markup=windows_keyboard()
-    )
+        try:
+            if title:
+                for w in gw.getAllWindows():
+                    if w.title == title:
+                        w.close()
+                        break
+
+            await q.answer("Закрито")
+            await q.edit_message_text(
+                "🖥 Відкриті програми:",
+                reply_markup=windows_keyboard()
+            )
+        except Exception as e:
+            log.exception("Помилка закриття вікна")
+            await q.answer(f"❌ Помилка: {e}", show_alert=True)
 # ──────────── MAIN ────────────
 async def startup_notify(app):
     await app.bot.send_message(
@@ -696,7 +727,7 @@ async def startup_notify(app):
 
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌  Встав свій токен у змінну BOT_TOKEN у файлі bot.py!")
+        print("❌  Встав свій токен у файлі bot.py!")
         sys.exit(1)
 
     app = (
