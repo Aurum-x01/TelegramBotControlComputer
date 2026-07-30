@@ -82,9 +82,7 @@ search погода Варшава
 | 💬 Discord | `AppData\Local\Discord\...` |
 | ⛏️ TLauncher | `AppData\Roaming\.minecraft\TLauncher.exe` |
 | 🧅 Tor Browser | `Desktop\Tor Browser\Browser\firefox.exe` |
-| 🪖 SQUAD | `.url`-ярлик до Steam-гри |
-| ⚠️ FPV (Kamikaze Drone) | `.url`-ярлик до Steam-гри |
-| 🚛 ETS2 | `.url`-ярлик до Steam-гри |
+
 
 ### Додати свою програму в amenu
 У `bot.py` знайди список `AMENU_APPS` і додай рядок:
