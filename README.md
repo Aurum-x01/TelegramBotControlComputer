@@ -1,3 +1,5 @@
+🇺🇦 [Українська версія](./uk.md)
+
 # 🖥️ PC Control Bot — Telegram Bot for PC Control
 
 Control your computer via Telegram: volume, brightness, launching apps, open windows, and much more.
