@@ -13,7 +13,7 @@ from telegram.ext import (
 import pygetwindow as gw
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-_WINDOW_TITLES = {}  # idx -> title, оновлюється щоразу при відкритті меню вікон
+_WINDOW_TITLES = {}  # idx -> title, refreshed every time the windows menu is opened
 
 def windows_keyboard():
     kb = []
@@ -30,15 +30,15 @@ def windows_keyboard():
             ])
 
     kb.append([
-        InlineKeyboardButton("⬅️ Назад", callback_data="back_main")
+        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
     ])
 
     return InlineKeyboardMarkup(kb)
 # ─────────────────────────────────────────────
-# НАЛАШТУВАННЯ — заповни перед запуском!
+# SETTINGS — fill in before running!
 # ─────────────────────────────────────────────
-BOT_TOKEN   = ""   # токен від @BotFather
-ALLOWED_ID  = 123456789               # твій Telegram user_id (перевір через @userinfobot)
+BOT_TOKEN   = ""   # token from @BotFather
+ALLOWED_ID  = 123456789               # your Telegram user_id (check via @userinfobot)
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -60,11 +60,11 @@ AMENU_APPS = [
 def guard(update: Update) -> bool:
     uid = update.effective_user.id if update.effective_user else None
     if uid != ALLOWED_ID:
-        log.warning("Заблоковано: user_id=%s", uid)
+        log.warning("Blocked: user_id=%s", uid)
         return False
     return True
 
-# ──────────── PowerShell helper (прихований, без вікна) ────────────
+# ──────────── PowerShell helper (hidden, no window) ────────────
 def _ps(cmd: str) -> str:
     CREATE_NO_WINDOW = 0x08000000
     result = subprocess.run(
@@ -74,14 +74,14 @@ def _ps(cmd: str) -> str:
     )
     return result.stdout.strip()
 
-# ──────────── ЗВУК — pycaw (з правильною ініціалізацією COM) ────────────
+# ──────────── VOLUME — pycaw (with proper COM initialization) ────────────
 try:
     from ctypes import cast, POINTER
     import comtypes
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
     def _vol_iface():
-        # COM треба ініціалізувати в КОЖНОМУ потоці, де він використовується
+        # COM must be initialized in EVERY thread that uses it
         comtypes.CoInitialize()
         devices = AudioUtilities.GetSpeakers()
         iface = devices.Activate(
@@ -90,7 +90,7 @@ try:
         return cast(iface, POINTER(IAudioEndpointVolume))
 
     def get_volume_status() -> tuple[int, bool]:
-        """Повертає (відсоток_гучності, чи_замучено)"""
+        """Returns (volume_percent, is_muted)"""
         v = _vol_iface()
         pct = round(v.GetMasterVolumeLevelScalar() * 100)
         muted = bool(v.GetMute())
@@ -120,18 +120,18 @@ try:
         v.SetMasterVolumeLevelScalar(0.0, None)
         return 0, bool(v.GetMute())
 
-    # тестовий виклик при старті — якщо впаде, перейдемо у except нижче
+    # test call on startup — if it fails, we fall through to except below
     _test = _vol_iface()
     _test.GetMasterVolumeLevelScalar()
 
-    log.info("pycaw: керування звуком активне ✅")
+    log.info("pycaw: volume control active ✅")
 
 except Exception as e:
-    log.warning(f"pycaw недоступний ({e}) — використовується WinAPI keybd_event")
+    log.warning(f"pycaw unavailable ({e}) — using WinAPI keybd_event")
 
-    # ──────────── FALLBACK: WinAPI keybd_event (без COM, завжди працює) ────────────
-    # Тут немає прямого доступу до точного % гучності системи, тому
-    # ведемо приблизний внутрішній лічильник у самому боті.
+    # ──────────── FALLBACK: WinAPI keybd_event (no COM, always works) ────────────
+    # There's no direct access to the exact system volume % here, so we
+    # keep an approximate internal counter inside the bot itself.
     VK_VOLUME_UP   = 0xAF
     VK_VOLUME_DOWN = 0xAE
     VK_VOLUME_MUTE = 0xAD
@@ -154,7 +154,7 @@ except Exception as e:
         ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
         ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
 
-    _fallback_state = {"level": 50, "muted": False}  # початкове наближення
+    _fallback_state = {"level": 50, "muted": False}  # initial approximation
 
     def _media_key(vk: int, count: int = 1):
         for _ in range(count):
@@ -190,7 +190,7 @@ except Exception as e:
         url = f"https://www.google.com/search?q={q}"
         webbrowser.open(url)
 
-# ──────────── ЯСКРАВІСТЬ (через WMI напряму, без PowerShell) ────────────
+# ──────────── BRIGHTNESS (via WMI directly, no PowerShell) ────────────
 try:
     import wmi as _wmi_module
     _wmi_obj = _wmi_module.WMI(namespace="root/WMI")
@@ -209,10 +209,10 @@ try:
             pass
         return level
 
-    log.info("WMI: яскравість активна ✅")
+    log.info("WMI: brightness active ✅")
 
 except Exception as _wmi_err:
-    log.warning(f"WMI недоступний ({_wmi_err}) — fallback через PowerShell")
+    log.warning(f"WMI unavailable ({_wmi_err}) — falling back to PowerShell")
 
     def _get_brightness() -> int:
         out = _ps("(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness")
@@ -233,7 +233,7 @@ def brightness_down() -> int:
     return _set_brightness(_get_brightness() - 10)
 
 
-# ──────────── СИСТЕМНІ ────────────
+# ──────────── SYSTEM ────────────
 def minimize_all():
     _ps("(New-Object -com Shell.Application).MinimizeAll()")
 
@@ -251,8 +251,8 @@ def press_space():
     ctypes.windll.user32.keybd_event(VK_SPACE, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
 
 def open_app(name: str):
-    # CREATE_NEW_CONSOLE — щоб консольні застосунки (cmd, powershell)
-    # відкривались у власному вікні, а не виводили текст у консоль бота
+    # CREATE_NEW_CONSOLE — so console apps (cmd, powershell) open in their
+    # own window instead of dumping text into the bot's own console
     CREATE_NEW_CONSOLE = 0x00000010
     subprocess.Popen(
         name,
@@ -260,11 +260,11 @@ def open_app(name: str):
         creationflags=CREATE_NEW_CONSOLE
     )
 
-def show_text_window(text: str, title: str = "Повідомлення"):
+def show_text_window(text: str, title: str = "Message"):
     """
-    Показує текст у легкому спливаючому віконці через mshta
-    (вбудований у Windows HTML-движок, без temp-файлів і без
-    окремого процесу типу notepad.exe, що висить у пам'яті).
+    Shows text in a lightweight popup window via mshta
+    (Windows' built-in HTML engine, no temp files and no
+    separate process like notepad.exe hanging around in memory).
     """
     import html as html_lib
 
@@ -315,13 +315,13 @@ def show_text_window(text: str, title: str = "Повідомлення"):
     folder = os.path.join(tempfile.gettempdir(), "tgbot_hta")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"note_{int(time.time()*1000)}.hta")
-    # utf-8-sig (з BOM) — mshta правильно визначає кодування і кирилицю
+    # utf-8-sig (with BOM) — mshta correctly detects the encoding and Cyrillic text
     with open(path, "w", encoding="utf-8-sig") as f:
         f.write(hta)
 
     subprocess.Popen(["mshta.exe", path])
 
-    # видаляємо файл за кілька секунд, mshta вже встигне його прочитати
+    # delete the file after a few seconds, mshta will have already read it
     def _cleanup():
         time.sleep(3)
         try:
@@ -347,34 +347,34 @@ def open_url(link: str, incognito: bool = False):
     else:
         webbrowser.open(link)
 
-# ──────────── КЛАВІАТУРИ ────────────
+# ──────────── KEYBOARDS ────────────
 def main_keyboard():
     kb = [
         [
-            InlineKeyboardButton("🔊 Гучніше",     callback_data="vol_up"),
-            InlineKeyboardButton("🔉 Тихіше",      callback_data="vol_down"),
-            InlineKeyboardButton("🔇 Тихо/Звук",   callback_data="vol_mute"),
+            InlineKeyboardButton("🔊 Louder",     callback_data="vol_up"),
+            InlineKeyboardButton("🔉 Quieter",    callback_data="vol_down"),
+            InlineKeyboardButton("🔇 Mute/Sound", callback_data="vol_mute"),
         ],
         [
-            InlineKeyboardButton("🔕 Звук = 0",    callback_data="vol_zero"),
+            InlineKeyboardButton("🔕 Volume = 0", callback_data="vol_zero"),
         ],
         [
-            InlineKeyboardButton("☀️ Яскравіше",   callback_data="br_up"),
-            InlineKeyboardButton("🌑 Темніше",     callback_data="br_down"),
+            InlineKeyboardButton("☀️ Brighter",   callback_data="br_up"),
+            InlineKeyboardButton("🌑 Darker",     callback_data="br_down"),
         ],
         [
             InlineKeyboardButton("_SPACE", callback_data="space"),
         ],
         [
-            InlineKeyboardButton("🗕 Згорнути все", callback_data="minimize"),
-            InlineKeyboardButton("🔒 Блокувати",    callback_data="lock"),
+            InlineKeyboardButton("🗕 Minimize all", callback_data="minimize"),
+            InlineKeyboardButton("🔒 Lock",         callback_data="lock"),
         ],
         [
-            InlineKeyboardButton("📋 Швидке меню", callback_data="amenu"),
-            InlineKeyboardButton("⚡ Вимкнути ПК", callback_data="theend"),
+            InlineKeyboardButton("📋 Quick menu", callback_data="amenu"),
+            InlineKeyboardButton("⚡ Shut down PC", callback_data="theend"),
         ],
         [
-            InlineKeyboardButton("🪟 Вікна", callback_data="windows")
+            InlineKeyboardButton("🪟 Windows", callback_data="windows")
         ],
     ]
     return InlineKeyboardMarkup(kb)
@@ -386,34 +386,34 @@ def amenu_keyboard():
         for idx, (label, app) in enumerate(AMENU_APPS[i:i+2], start=i):
             row.append(InlineKeyboardButton(label, callback_data=f"open__{idx}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_main")])
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
     return InlineKeyboardMarkup(rows)
 
 def yt_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⏯ Пауза", callback_data="yt_pause"),
+            InlineKeyboardButton("⏯ Pause", callback_data="yt_pause"),
         ],
         [
-            InlineKeyboardButton("⏪ -10с", callback_data="yt_back"),
-            InlineKeyboardButton("⏩ +10с", callback_data="yt_forward"),
+            InlineKeyboardButton("⏪ -10s", callback_data="yt_back"),
+            InlineKeyboardButton("⏩ +10s", callback_data="yt_forward"),
         ],
         [
-            InlineKeyboardButton("⏭ Наступне", callback_data="yt_next"),
-            InlineKeyboardButton("⏮ Попереднє", callback_data="yt_prev"),
+            InlineKeyboardButton("⏭ Next", callback_data="yt_next"),
+            InlineKeyboardButton("⏮ Previous", callback_data="yt_prev"),
         ],
         [
-            InlineKeyboardButton("📺 Повний екран", callback_data="yt_full"),
+            InlineKeyboardButton("📺 Fullscreen", callback_data="yt_full"),
         ],
         [
-            InlineKeyboardButton("⬅️ Назад", callback_data="back_main"),
+            InlineKeyboardButton("⬅️ Back", callback_data="back_main"),
         ]
     ])
 # ──────────── HANDLERS ────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not guard(update): return
     await update.message.reply_text(
-        "🖥️ *PC Control Bot*\n\nВибери дію або введи команду:",
+        "🖥️ *PC Control Bot*\n\nChoose an action or type a command:",
         parse_mode="Markdown",
         reply_markup=main_keyboard()
     )
@@ -421,19 +421,19 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not guard(update): return
     text = (
-        "📖 *Список команд:*\n\n"
-        "`/start` — головне меню\n"
-        "`write <текст>` — показати текст у вікні на ПК\n"
-        "  _Приклад:_ `write Привіт зі смартфону!`\n\n"
-        "`open <програма>` — відкрити програму\n"
-        "  _Приклад:_ `open notepad.exe`\n\n"
-        "`url <посилання>` — відкрити в браузері\n"
-        "  _Приклад:_ `url google.com`\n\n"
-        "`aurl <посилання>` — відкрити в інкогніто\n"
-        "  _Приклад:_ `aurl youtube.com`\n\n"
-        "`amenu` — швидке меню додатків\n"
-        "`lock` — заблокувати ПК\n"
-        "`theend` — вимкнути ПК\n"
+        "📖 *Command list:*\n\n"
+        "`/start` — main menu\n"
+        "`write <text>` — show text in a window on the PC\n"
+        "  _Example:_ `write Hello from my phone!`\n\n"
+        "`open <program>` — open a program\n"
+        "  _Example:_ `open notepad.exe`\n\n"
+        "`url <link>` — open in browser\n"
+        "  _Example:_ `url google.com`\n\n"
+        "`aurl <link>` — open in incognito\n"
+        "  _Example:_ `aurl youtube.com`\n\n"
+        "`amenu` — quick apps menu\n"
+        "`lock` — lock the PC\n"
+        "`theend` — shut down the PC\n"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -443,13 +443,13 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lower = text.lower()
 
     if lower.startswith("write "):
-        content = text[6:].strip()  # беремо з оригінального тексту, не lower(), щоб зберегти регістр
+        content = text[6:].strip()  # taken from the original text, not lower(), to preserve case
         if content:
             try:
                 show_text_window(content)
-                await update.message.reply_text("🪟 Показано у вікні на ПК")
+                await update.message.reply_text("🪟 Shown in a window on the PC")
             except Exception as e:
-                await update.message.reply_text(f"❌ Помилка: {e}")
+                await update.message.reply_text(f"❌ Error: {e}")
         return
 
     if lower.startswith("open "):
@@ -457,28 +457,28 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if app:
             try:
                 open_app(app)
-                await update.message.reply_text(f"✅ Відкриваю: `{app}`", parse_mode="Markdown")
+                await update.message.reply_text(f"✅ Opening: `{app}`", parse_mode="Markdown")
             except Exception as e:
-                await update.message.reply_text(f"❌ Помилка: {e}")
+                await update.message.reply_text(f"❌ Error: {e}")
         return
 
     if lower.startswith("url "):
         link = text[4:].strip()
         if link:
             open_url(link, incognito=False)
-            await update.message.reply_text(f"🌐 Відкриваю: `{link}`", parse_mode="Markdown")
+            await update.message.reply_text(f"🌐 Opening: `{link}`", parse_mode="Markdown")
         return
 
     if lower.startswith("aurl "):
         link = text[5:].strip()
         if link:
             open_url(link, incognito=True)
-            await update.message.reply_text(f"🕵️ Інкогніто: `{link}`", parse_mode="Markdown")
+            await update.message.reply_text(f"🕵️ Incognito: `{link}`", parse_mode="Markdown")
         return
 
     if lower == "amenu":
         await update.message.reply_text(
-            "📋 *Швидке меню*\nВибери програму:",
+            "📋 *Quick menu*\nChoose a program:",
             parse_mode="Markdown",
             reply_markup=amenu_keyboard()
         )
@@ -486,11 +486,11 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if lower == "lock":
         lock_pc()
-        await update.message.reply_text("🔒 ПК заблоковано")
+        await update.message.reply_text("🔒 PC locked")
         return
 
     if lower == "theend":
-        await update.message.reply_text("⚡ Вимкнення через 10 секунд...")
+        await update.message.reply_text("⚡ Shutting down in 10 seconds...")
         shutdown_pc()
         return
 
@@ -499,20 +499,20 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if query:
             search_web(query)
             await update.message.reply_text(
-                f"🔎 Пошук: `{query}`",
+                f"🔎 Search: `{query}`",
                 parse_mode="Markdown"
             )
         return
 
     if lower == "yt":
         await update.message.reply_text(
-            "🎬 Керування YouTube",
+            "🎬 YouTube control",
             reply_markup=yt_keyboard()
         )
         return
 
     await update.message.reply_text(
-        "❓ Не розумію. Введи `/help` для списку команд.",
+        "❓ I don't understand. Type `/help` for a list of commands.",
         parse_mode="Markdown"
     )
     return
@@ -531,25 +531,25 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     }
 
     actions = {
-        "br_up":    (brightness_up,   "☀️ Яскравість +10%"),
-        "br_down":  (brightness_down, "🌑 Яскравість -10%"),
-        "minimize": (minimize_all,    "🗕 Всі вікна згорнуто"),
-        "lock":     (lock_pc,         "🔒 ПК заблоковано"),
+        "br_up":    (brightness_up,   "☀️ Brightness +10%"),
+        "br_down":  (brightness_down, "🌑 Brightness -10%"),
+        "minimize": (minimize_all,    "🗕 All windows minimized"),
+        "lock":     (lock_pc,         "🔒 PC locked"),
     }
 
     if data in VOLUME_ACTIONS:
         try:
             pct, muted = VOLUME_ACTIONS[data]()
             if muted:
-                msg = "🔇 Звук вимкнено"
+                msg = "🔇 Sound muted"
             elif pct == 0:
-                msg = "🔕 Гучність: 0% (тихо)"
+                msg = "🔕 Volume: 0% (muted)"
             else:
-                msg = f"🔊 Гучність: {pct}%"
+                msg = f"🔊 Volume: {pct}%"
             await q.answer(msg, show_alert=False)
         except Exception as e:
-            log.exception("Помилка дії %s", data)
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+            log.exception("Error performing action %s", data)
+            await q.answer(f"❌ Error: {e}", show_alert=True)
 
     elif data in actions:
         fn, msg = actions[data]
@@ -557,32 +557,32 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             fn()
             await q.answer(msg, show_alert=False)
         except Exception as e:
-            log.exception("Помилка дії %s", data)
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+            log.exception("Error performing action %s", data)
+            await q.answer(f"❌ Error: {e}", show_alert=True)
 
     elif data == "theend":
         await q.answer()
         kb = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ Так", callback_data="shutdown_yes"),
-                InlineKeyboardButton("❌ Ні", callback_data="shutdown_no"),
+                InlineKeyboardButton("✅ Yes", callback_data="shutdown_yes"),
+                InlineKeyboardButton("❌ No", callback_data="shutdown_no"),
             ]
         ])
 
         await q.edit_message_text(
-            "⚠️ Ви справді хочете вимкнути комп'ютер?",
+            "⚠️ Are you sure you want to shut down the computer?",
             reply_markup=kb
         )
     
     elif data == "shutdown_yes":
-        await q.answer("Вимикаю ПК...")
-        await q.edit_message_text("⚡ Комп'ютер буде вимкнений через 10 секунд...")
+        await q.answer("Shutting down PC...")
+        await q.edit_message_text("⚡ The computer will shut down in 10 seconds...")
         subprocess.run(["shutdown", "/s", "/t", "10"])
 
     elif data == "shutdown_no":
-        await q.answer("Скасовано")
+        await q.answer("Cancelled")
         await q.edit_message_text(
-            "🖥️ *PC Control Bot*\nВибери дію:",
+            "🖥️ *PC Control Bot*\nChoose an action:",
             parse_mode="Markdown",
             reply_markup=main_keyboard()
         )
@@ -591,18 +591,18 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         try:
             await q.edit_message_text(
-                "📋 *Швидке меню*\nВибери програму:",
+                "📋 *Quick menu*\nChoose a program:",
                 parse_mode="Markdown",
                 reply_markup=amenu_keyboard()
             )
         except Exception:
-            pass  # повідомлення вже таке саме
+            pass  # message is already the same
 
     elif data == "back_main":
         await q.answer()
         try:
             await q.edit_message_text(
-                "🖥️ *PC Control Bot*\nВибери дію:",
+                "🖥️ *PC Control Bot*\nChoose an action:",
                 parse_mode="Markdown",
                 reply_markup=main_keyboard()
             )
@@ -614,91 +614,91 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             idx = int(data[6:])
             label, app = AMENU_APPS[idx]
             open_app(app)
-            await q.answer(f"✅ Відкриваю: {label}")
+            await q.answer(f"✅ Opening: {label}")
         except Exception as e:
-            log.exception("Помилка відкриття за index %s", data)
+            log.exception("Error opening by index %s", data)
             await q.answer(f"❌ {e}", show_alert=True)
     elif data == "space":
         try:
             press_space()
-            await q.answer("␣ Пробіл натиснуто", show_alert=False)
+            await q.answer("␣ Space pressed", show_alert=False)
         except Exception as e:
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+            await q.answer(f"❌ Error: {e}", show_alert=True)
 
     elif data == "yt_pause":
         press_key(VK_K)
-        await q.answer("⏯ Пауза")
+        await q.answer("⏯ Pause")
 
     elif data == "yt_forward":
         press_key(VK_L)
-        await q.answer("+10 секунд")
+        await q.answer("+10 seconds")
 
     elif data == "yt_back":
         press_key(VK_J)
-        await q.answer("-10 секунд")
+        await q.answer("-10 seconds")
 
     elif data == "yt_full":
         press_key(VK_F)
-        await q.answer("Повний екран")
+        await q.answer("Fullscreen")
 
     elif data == "yt_next":
         press_key(VK_N)
-        await q.answer("Наступне відео")
+        await q.answer("Next video")
 
     elif data == "yt_prev":
         press_key(VK_P)
-        await q.answer("Попереднє відео")
+        await q.answer("Previous video")
 
     elif data == "windows":
         try:
             await q.edit_message_text(
-                "🖥 Відкриті програми:",
+                "🖥 Open programs:",
                 reply_markup=windows_keyboard()
             )
             await q.answer()
         except Exception as e:
-            log.exception("Помилка відкриття списку вікон")
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+            log.exception("Error opening window list")
+            await q.answer(f"❌ Error: {e}", show_alert=True)
 
     elif data.startswith("closewin|"):
         try:
             idx = int(data.split("|", 1)[1])
         except (ValueError, IndexError):
-            await q.answer("❌ Некоректні дані", show_alert=True)
+            await q.answer("❌ Invalid data", show_alert=True)
             return
 
         title = _WINDOW_TITLES.get(idx)
         if title is None:
-            await q.answer("❌ Вікно вже не існує, онови список", show_alert=True)
+            await q.answer("❌ Window no longer exists, refresh the list", show_alert=True)
             return
 
         kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    "✅ Так",
+                    "✅ Yes",
                     callback_data=f"closeyes|{idx}"
                 ),
                 InlineKeyboardButton(
-                    "❌ Ні",
+                    "❌ No",
                     callback_data="windows"
                 )
             ]
         ])
         try:
             await q.edit_message_text(
-                f"❓ Закрити\n\n{title}?",
+                f"❓ Close\n\n{title}?",
                 reply_markup=kb
             )
             await q.answer()
         except Exception as e:
-            log.exception("Помилка підтвердження закриття вікна")
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+            log.exception("Error confirming window close")
+            await q.answer(f"❌ Error: {e}", show_alert=True)
 
     elif data.startswith("closeyes|"):
         try:
             idx = int(data.split("|", 1)[1])
         except (ValueError, IndexError):
-            await q.answer("❌ Некоректні дані", show_alert=True)
+            await q.answer("❌ Invalid data", show_alert=True)
             return
 
         title = _WINDOW_TITLES.get(idx)
@@ -710,24 +710,24 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         w.close()
                         break
 
-            await q.answer("Закрито")
+            await q.answer("Closed")
             await q.edit_message_text(
-                "🖥 Відкриті програми:",
+                "🖥 Open programs:",
                 reply_markup=windows_keyboard()
             )
         except Exception as e:
-            log.exception("Помилка закриття вікна")
-            await q.answer(f"❌ Помилка: {e}", show_alert=True)
+            log.exception("Error closing window")
+            await q.answer(f"❌ Error: {e}", show_alert=True)
 # ──────────── MAIN ────────────
 async def startup_notify(app):
     await app.bot.send_message(
         chat_id=ALLOWED_ID,
-        text="🟢 Комп'ютер увімкнувся та бот запущений."
+        text="🟢 Computer turned on and bot started."
     )
 
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌  Встав свій токен у файлі bot.py!")
+        print("❌  Insert your token in bot.py!")
         sys.exit(1)
 
     app = (
@@ -741,7 +741,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
-    log.info("Бот запущено ✅")
+    log.info("Bot started ✅")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
