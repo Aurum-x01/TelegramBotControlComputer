@@ -17,8 +17,8 @@ _WINDOW_TITLES = {}  # idx -> title, оновлюється щоразу при 
 # ─────────────────────────────────────────────
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
-BOT_TOKEN   = "8927619037:AAFkiD42suxeAvucy6Ugjbc9WQ-3iG3pLKg"   # токен від @BotFather
-ALLOWED_ID  = 1026975619                                      # твій Telegram user_id (перевір через @userinfobot)
+BOT_TOKEN   = ""   # токен від @BotFather
+ALLOWED_ID  =                                       # твій Telegram user_id (перевір через @userinfobot)
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
