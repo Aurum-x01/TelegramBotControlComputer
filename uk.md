@@ -1,4 +1,4 @@
-# 🖥️ PC Control Bot — Telegram бот для керування ПК
+# 🖥️ PC Control uk_bot — Telegram бот для керування ПК
 
 Керуй своїм комп'ютером через Telegram: звук, яскравість, запуск програм, відкриті вікна та багато іншого.
 
@@ -13,16 +13,16 @@
 pip install -r requirements.txt
 ```
 
-### 3. Налаштуй bot.py
-Відкрий `bot.py` і встав свої дані:
+### 3. Налаштуй uk_uk_bot.py
+Відкрий `uk_bot.py` і встав свої дані:
 ```python
-BOT_TOKEN  = "токен_від_BotFather"   # @BotFather → /newbot
-ALLOWED_ID = 123456789               # свій ID з @userinfobot
+uk_bot_TOKEN  = "токен_від_uk_botFather"   # @uk_botFather → /newuk_bot
+ALLOWED_ID = 123456789               # свій ID з @userinfouk_bot
 ```
 
 ### 4. Запусти бота
 ```
-python bot.py
+python uk_bot.py
 ```
 
 ---
@@ -85,7 +85,7 @@ search погода Варшава
 
 
 ### Додати свою програму в amenu
-У `bot.py` знайди список `AMENU_APPS` і додай рядок:
+У `uk_bot.py` знайди список `AMENU_APPS` і додай рядок:
 ```python
 ("🎯 Назва", r"C:\повний\шлях\до\програми.exe"),
 ```
@@ -133,10 +133,10 @@ search погода Варшава
 ## 🔁 Автозапуск при старті Windows
 
 1. Натисни `Win + R`, введи `shell:startup`
-2. Створи файл `start_bot.bat` з вмістом:
+2. Створи файл `start_uk_bot.bat` з вмістом:
 ```bat
 @echo off
-pythonw "C:\шлях\до\bot.py"
+pythonw "C:\шлях\до\uk_bot.py"
 ```
 3. Скопіюй `.bat` у папку автозапуску
 
