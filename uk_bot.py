@@ -18,7 +18,7 @@ _WINDOW_TITLES = {}  # idx -> title, оновлюється щоразу при 
 # НАЛАШТУВАННЯ — заповни перед запуском!
 # ─────────────────────────────────────────────
 BOT_TOKEN   = ""   # токен від @BotFather
-ALLOWED_ID  =                                       # твій Telegram user_id (перевір через @userinfobot)
+ALLOWED_ID  = 123456789                                      # твій Telegram user_id (перевір через @userinfobot)
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -31,6 +31,10 @@ log = logging.getLogger(__name__)
 AMENU_APPS = [
     ("🎮 Steam",        r"C:\Program Files (x86)\Steam\steam.exe"),
     ("💬 Discord",      r"C:\Users\pestr\AppData\Local\Discord\Update.exe --processStart Discord.exe"),
+    ("⛏️ TLauncher",    r"C:\Users\pestr\AppData\Roaming\.minecraft\TLauncher.exe"),
+    ("🧅 Tor Browser",  r"C:\Users\pestr\Desktop\Tor Browser\Browser\firefox.exe"),
+    ("🪖 SQUAD",        r"C:\Users\pestr\Desktop\files\cos\steam\Squad.url"),
+    ("⚠️ FPV",          r"C:\Users\pestr\Desktop\files\cos\steam\FPV Kamikaze Drone.url"),
     ("🚛 ETS",          r"C:\Users\pestr\Desktop\files\cos\steam\Euro Truck Simulator 2.url"),
 ]
 
@@ -129,109 +133,42 @@ try:
     log.info("pycaw: керування звуком активне ✅")
 
 except Exception as e:
-    log.warning(f"pycaw недоступний ({e}) — використовується фолбек через PowerShell/COM")
+    log.warning(f"pycaw недоступний ({e}) — використовується WinAPI keybd_event")
 
-    # ──────────── FALLBACK: справжнє системне гучномовлення через PowerShell + COM ────────────
-    # (той самий підхід, що й у фолбеку яскравості: реальний запит/зміна стану ОС,
-    # а не локальний лічильник, що ні з чим не синхронізований)
-    import tempfile as _tempfile
+    # ──────────── FALLBACK: WinAPI keybd_event (без COM, завжди працює) ────────────
+    VK_VOLUME_UP   = 0xAF
+    VK_VOLUME_DOWN = 0xAE
+    VK_VOLUME_MUTE = 0xAD
 
-    _AUDIO_PS1_SOURCE = r'''
-Add-Type -TypeDefinition @"
-using System.Runtime.InteropServices;
+    _fallback_state = {"level": 50, "muted": False}  # початкове наближення
 
-[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IAudioEndpointVolume {
-    int NotImpl1(); int NotImpl2(); int NotImpl3();
-    int SetMasterVolumeLevel(float level, System.Guid eventContext);
-    int SetMasterVolumeLevelScalar(float level, System.Guid eventContext);
-    int NotImpl4();
-    int GetMasterVolumeLevelScalar(out float level);
-    int NotImpl5(); int NotImpl6(); int NotImpl7();
-    int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, System.Guid eventContext);
-    int GetMute(out bool mute);
-}
-[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IMMDevice {
-    int Activate(ref System.Guid iid, int clsCtx, int activationParams, out IAudioEndpointVolume endpoint);
-}
-[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IMMDeviceEnumerator {
-    int NotImpl0();
-    int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
-}
-[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] public class DeviceEnumComObj { }
-
-public class SysAudio {
-    static IAudioEndpointVolume GetVol() {
-        var enumerator = (IMMDeviceEnumerator)(new DeviceEnumComObj());
-        IMMDevice dev;
-        enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
-        var iid = typeof(IAudioEndpointVolume).GUID;
-        IAudioEndpointVolume epv;
-        dev.Activate(ref iid, 23, 0, out epv);
-        return epv;
-    }
-    public static float GetLevel() { float l; GetVol().GetMasterVolumeLevelScalar(out l); return l; }
-    public static void SetLevel(float l) { GetVol().SetMasterVolumeLevelScalar(l, System.Guid.Empty); }
-    public static bool GetMuted() { bool m; GetVol().GetMute(out m); return m; }
-    public static void SetMuted(bool m) { GetVol().SetMute(m, System.Guid.Empty); }
-}
-"@
-
-switch ($args[0]) {
-    "get"  { "{0}|{1}" -f [SysAudio]::GetLevel(), [SysAudio]::GetMuted() }
-    "set"  { [SysAudio]::SetLevel([float]$args[1]); "{0}|{1}" -f [SysAudio]::GetLevel(), [SysAudio]::GetMuted() }
-    "mute" { [SysAudio]::SetMuted(-not [SysAudio]::GetMuted()); "{0}|{1}" -f [SysAudio]::GetLevel(), [SysAudio]::GetMuted() }
-}
-'''.strip()
-
-    _audio_ps1_path_cache = None
-
-    def _audio_ps1_path() -> str:
-        global _audio_ps1_path_cache
-        if _audio_ps1_path_cache is None or not os.path.exists(_audio_ps1_path_cache):
-            folder = os.path.join(_tempfile.gettempdir(), "tgbot_audio")
-            os.makedirs(folder, exist_ok=True)
-            path = os.path.join(folder, "audio.ps1")
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(_AUDIO_PS1_SOURCE)
-            _audio_ps1_path_cache = path
-        return _audio_ps1_path_cache
-
-    def _run_audio_ps1(*args) -> tuple[int, bool]:
-        CREATE_NO_WINDOW = 0x08000000
-        result = subprocess.run(
-            ["powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
-             "-File", _audio_ps1_path(), *[str(a) for a in args]],
-            capture_output=True, text=True,
-            creationflags=CREATE_NO_WINDOW
-        )
-        out = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
-        try:
-            level_str, mute_str = out.split("|")
-            return round(float(level_str) * 100), mute_str.strip().lower() == "true"
-        except Exception:
-            raise RuntimeError(result.stderr.strip() or "не вдалося прочитати гучність з PowerShell")
+    def _media_key(vk: int, count: int = 1):
+        for _ in range(count):
+            press_key(vk)
 
     def get_volume_status() -> tuple[int, bool]:
-        return _run_audio_ps1("get")
+        return _fallback_state["level"], _fallback_state["muted"]
 
     def volume_up() -> tuple[int, bool]:
-        pct, _ = _run_audio_ps1("get")
-        new_level = min(1.0, (pct + 10) / 100)
-        return _run_audio_ps1("set", round(new_level, 2))
+        _media_key(VK_VOLUME_UP, 5)
+        _fallback_state["level"] = min(100, _fallback_state["level"] + 10)
+        _fallback_state["muted"] = False
+        return _fallback_state["level"], _fallback_state["muted"]
 
     def volume_down() -> tuple[int, bool]:
-        pct, _ = _run_audio_ps1("get")
-        new_level = max(0.0, (pct - 10) / 100)
-        return _run_audio_ps1("set", round(new_level, 2))
+        _media_key(VK_VOLUME_DOWN, 5)
+        _fallback_state["level"] = max(0, _fallback_state["level"] - 10)
+        return _fallback_state["level"], _fallback_state["muted"]
 
     def volume_mute() -> tuple[int, bool]:
-        return _run_audio_ps1("mute")
+        _media_key(VK_VOLUME_MUTE, 1)
+        _fallback_state["muted"] = not _fallback_state["muted"]
+        return _fallback_state["level"], _fallback_state["muted"]
 
     def volume_zero() -> tuple[int, bool]:
-        return _run_audio_ps1("set", 0)
+        _media_key(VK_VOLUME_DOWN, 50)
+        _fallback_state["level"] = 0
+        return 0, _fallback_state["muted"]
 
 # ──────────── ЯСКРАВІСТЬ (через WMI напряму, без PowerShell) ────────────
 try:
@@ -827,8 +764,8 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         kb = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ Так", callback_data="shutdown_yes", style="danger"),
-                InlineKeyboardButton("❌ Ні", callback_data="shutdown_no", style="success"),
+                InlineKeyboardButton("Так", callback_data="shutdown_yes", style="danger"),
+                InlineKeyboardButton("Ні", callback_data="shutdown_no", style="success"),
             ]
         ])
         await q.edit_message_text(
