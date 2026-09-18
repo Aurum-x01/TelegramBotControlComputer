@@ -31,10 +31,6 @@ log = logging.getLogger(__name__)
 AMENU_APPS = [
     ("🎮 Steam",        r"C:\Program Files (x86)\Steam\steam.exe"),
     ("💬 Discord",      r"C:\Users\pestr\AppData\Local\Discord\Update.exe --processStart Discord.exe"),
-    ("⛏️ TLauncher",    r"C:\Users\pestr\AppData\Roaming\.minecraft\TLauncher.exe"),
-    ("🧅 Tor Browser",  r"C:\Users\pestr\Desktop\Tor Browser\Browser\firefox.exe"),
-    ("🪖 SQUAD",        r"C:\Users\pestr\Desktop\files\cos\steam\Squad.url"),
-    ("⚠️ FPV",          r"C:\Users\pestr\Desktop\files\cos\steam\FPV Kamikaze Drone.url"),
     ("🚛 ETS",          r"C:\Users\pestr\Desktop\files\cos\steam\Euro Truck Simulator 2.url"),
 ]
 
